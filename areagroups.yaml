@@ -87,4 +87,3 @@ action:
       message: >-
         Gruppo '{{ group_id }}' aggiornato con {{ matching_entities | length }} entità: 
         {{ matching_entities | join(', ') }}
-
