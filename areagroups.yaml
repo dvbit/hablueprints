@@ -14,14 +14,6 @@ blueprint:
       default: light
       selector:
         text:
-    update_interval:
-      name: Frequenza aggiornamento (minuti)
-      default: 10
-      selector:
-        number:
-          min: 1
-          max: 1440
-          unit_of_measurement: minuti
     excluded_entities:
       name: Entità da escludere
       default: []
@@ -33,7 +25,7 @@ trigger:
   - platform: homeassistant
     event: start
   - platform: time_pattern
-    minutes: "/{{ update_interval }}"
+    minutes: "/10"
 
 variables:
   area_id: !input target_area
