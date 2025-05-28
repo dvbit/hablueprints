@@ -1,0 +1,64 @@
+blueprint:
+  name: Crea/Aggiorna gruppo per etichette (dominio + esclusioni + frequenza)
+  description: >
+    Crea un gruppo dinamico per entità che contengono una o più etichette specifiche (in un attributo chiamato "label").
+  domain: automation
+  input:
+    labels:
+      name: Etichette (separate da virgole)
+      selector:
+        text:
+    domain_type:
+      name: Dominio
+      default: light
+      selector:
+        text:
+    update_interval:
+      name: Frequenza aggiornamento (minuti)
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 1440
+          unit_of_measurement: minuti
+    excluded_entities:
+      name: Entità da escludere
+      default: []
+      selector:
+        entity:
+          multiple: true
+
+trigger:
+  - platform: homeassistant
+    event: start
+  - platform: time_pattern
+    minutes: "/{{ update_interval }}"
+
+variables:
+  label_input: !input labels
+  domain_type: !input domain_type
+  update_interval: !input update_interval
+  excluded_entities: !input excluded_entities
+  label_list: "{{ label_input.split(',') | map('trim') | list }}"
+  label_slug: "{{ label_list | join('_') | lower | replace(' ', '_') | replace('-', '_') }}"
+  group_id: "{{ domain_type }}_label_{{ label_slug }}"
+
+action:
+  - service: group.set
+    data:
+      object_id: "{{ group_id }}"
+      name: "{{ domain_type.capitalize() }} con etichette: {{ label_list | join(', ') }}"
+      entities: >
+        {% set ns = namespace(matched=[]) %}
+        {% for e in states[domain_type] %}
+          {% set labels = state_attr(e.entity_id, 'label') %}
+          {% if labels %}
+            {% set label_set = labels if labels is iterable else [labels] %}
+            {% if label_set | select('in', label_list) | list | count > 0 and e.entity_id not in excluded_entities %}
+              {% set ns.matched = ns.matched + [e.entity_id] %}
+            {% endif %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.matched }}
+
+mode: single
