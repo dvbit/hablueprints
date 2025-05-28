@@ -1,0 +1,60 @@
+blueprint:
+  name: Crea/Aggiorna gruppo per piano (dominio + esclusioni + frequenza)
+  description: >
+    Crea o aggiorna un gruppo contenente tutte le entità di un determinato dominio associate alle aree di un piano specifico.
+  domain: automation
+  input:
+    target_floor:
+      name: Nome del piano (esattamente come definito in Home Assistant)
+      selector:
+        text:
+    domain_type:
+      name: Dominio
+      default: light
+      selector:
+        text:
+    update_interval:
+      name: Frequenza aggiornamento (minuti)
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 1440
+          unit_of_measurement: minuti
+    excluded_entities:
+      name: Entità da escludere
+      default: []
+      selector:
+        entity:
+          multiple: true
+
+trigger:
+  - platform: homeassistant
+    event: start
+  - platform: time_pattern
+    minutes: "/{{ update_interval }}"
+
+variables:
+  target_floor: !input target_floor
+  domain_type: !input domain_type
+  excluded_entities: !input excluded_entities
+  floor_slug: "{{ target_floor | lower | replace(' ', '_') | replace('-', '_') }}"
+  group_id: "{{ domain_type }}_{{ floor_slug }}"
+
+action:
+  - service: group.set
+    data:
+      object_id: "{{ group_id }}"
+      name: "{{ domain_type.capitalize() }} - {{ target_floor }}"
+      entities: >
+        {% set ns = namespace(result=[]) %}
+        {% for e in states[domain_type] %}
+          {% set area_id = area_id(e.entity_id) %}
+          {% set floor = area_id and state_attr('area.' ~ area_id, 'floor') %}
+          {% if floor == target_floor and e.entity_id not in excluded_entities %}
+            {% set ns.result = ns.result + [e.entity_id] %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.result }}
+
+mode: single
