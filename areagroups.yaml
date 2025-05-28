@@ -1,8 +1,8 @@
 blueprint:
   name: Crea/Aggiorna gruppo per area (dominio + esclusioni + frequenza)
   description: >
-    Crea o aggiorna dinamicamente un gruppo contenente tutte le entità di un determinato dominio in una specifica area.
-    Include possibilità di esclusioni e frequenza di aggiornamento.
+    Crea o aggiorna dinamicamente ogni 10 minuti un gruppo contenente tutte le entità di un determinato dominio in una specifica area.
+    Include possibilità di esclusioni .
   domain: automation
   input:
     target_area:
