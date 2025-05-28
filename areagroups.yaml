@@ -30,7 +30,6 @@ trigger:
 variables:
   area_id: !input target_area
   domain_type: !input domain_type
-  update_interval: !input update_interval
   excluded_entities: !input excluded_entities
   area_slug: "{{ area_name(area_id) | lower | replace(' ', '_') | replace('-', '_') }}"
   group_id: "{{ domain_type }}_{{ area_slug }}"
