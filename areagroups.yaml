@@ -1,51 +1,109 @@
 blueprint:
-  name: Crea/Aggiorna gruppo per area (dominio + esclusioni + frequenza)
-  description: >
-    Crea o aggiorna dinamicamente ogni 10 minuti un gruppo contenente tutte le entità di un determinato dominio in una specifica area.
-    Include possibilità di esclusioni .
+  name: Gruppo Dinamico per Dominio e Area
+  description: Crea e aggiorna automaticamente un gruppo con tutte le entità di un dominio specifico in un'area, escludendo entità specificate
   domain: automation
   input:
-    target_area:
-      name: Area
+    target_domain:
+      name: Dominio Target
+      description: Il dominio delle entità da includere (es. light, switch, sensor)
       selector:
-        area: {}
-    domain_type:
-      name: Dominio
-      default: light
+        text:
+    target_area:
+      name: Area Target
+      description: L'area da cui prendere le entità
+      selector:
+        area:
+    group_name:
+      name: Nome del Gruppo
+      description: Nome del gruppo da creare/aggiornare
+      default: "gruppo_dinamico"
       selector:
         text:
     excluded_entities:
-      name: Entità da escludere
-      default: []
+      name: Entità da Escludere
+      description: Lista delle entità da escludere (una per riga)
+      default: ""
       selector:
-        entity:
-          multiple: true
+        text:
+          multiline: true
+    update_interval:
+      name: Intervallo di Aggiornamento
+      description: Intervallo di aggiornamento in minuti
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 1440
+          unit_of_measurement: "minuti"
+
 trigger:
+  - platform: time_pattern
+    minutes: !input update_interval
   - platform: homeassistant
     event: start
-  - platform: time_pattern
-    minutes: "/10"
-
-variables:
-  area_id: !input target_area
-  domain_type: !input domain_type
-  excluded_entities: !input excluded_entities
-  area_slug: "{{ area_name(area_id) | lower | replace(' ', '_') | replace('-', '_') }}"
-  group_id: "{{ domain_type }}_{{ area_slug }}"
 
 action:
-  - service: group.set
+  - service: python_script.update_dynamic_group
     data:
-      object_id: "{{ group_id }}"
-      name: "{{ domain_type.capitalize() }} {{ area_name(area_id) }}"
-      entities: >
-        {% set domain_entities = states[domain_type] %}
-        {% set filtered = domain_entities
-          | selectattr('attributes.area_id', 'defined')
-          | selectattr('attributes.area_id', 'eq', area_id)
-          | map(attribute='entity_id')
-          | reject('in', excluded_entities)
-          | list %}
-        {{ filtered }}
+      domain: !input target_domain
+      area: !input target_area
+      group_name: !input group_name
+      excluded_entities: !input excluded_entities
 
-mode: single
+---
+# Python Script da salvare in /config/python_scripts/update_dynamic_group.py
+
+# Contenuto del file update_dynamic_group.py:
+"""
+domain = data.get('domain')
+area_name = data.get('area')
+group_name = data.get('group_name', 'gruppo_dinamico')
+excluded_entities_str = data.get('excluded_entities', '')
+
+# Parsing delle entità da escludere
+excluded_entities = []
+if excluded_entities_str:
+    excluded_entities = [entity.strip() for entity in excluded_entities_str.split('\n') if entity.strip()]
+
+# Trova l'area per nome
+area_registry = hass.helpers.area_registry.async_get(hass)
+target_area = None
+for area in area_registry.areas.values():
+    if area.name == area_name:
+        target_area = area
+        break
+
+if not target_area:
+    logger.error(f"Area '{area_name}' non trovata")
+    exit()
+
+# Ottieni il registro delle entità
+entity_registry = hass.helpers.entity_registry.async_get(hass)
+
+# Trova tutte le entità del dominio nell'area
+matching_entities = []
+for entity in entity_registry.entities.values():
+    # Controlla se l'entità appartiene al dominio specificato
+    if entity.entity_id.startswith(f"{domain}."):
+        # Controlla se l'entità è nell'area target
+        if entity.area_id == target_area.id:
+            # Escludi le entità nella lista di esclusione
+            if entity.entity_id not in excluded_entities:
+                # Verifica che l'entità esista ancora in Home Assistant
+                if hass.states.get(entity.entity_id) is not None:
+                    matching_entities.append(entity.entity_id)
+
+# Crea o aggiorna il gruppo
+if matching_entities:
+    service_data = {
+        'object_id': group_name,
+        'name': f"Gruppo {domain.title()} - {area_name}",
+        'entities': matching_entities,
+        'icon': 'mdi:folder-multiple'
+    }
+    
+    hass.services.call('group', 'set', service_data)
+    logger.info(f"Gruppo '{group_name}' aggiornato con {len(matching_entities)} entità: {matching_entities}")
+else:
+    logger.warning(f"Nessuna entità trovata per dominio '{domain}' nell'area '{area_name}'")
+"""
