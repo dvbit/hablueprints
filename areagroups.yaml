@@ -1,6 +1,6 @@
 blueprint:
-  name: Gruppo Dinamico per Dominio e Area
-  description: Crea e aggiorna automaticamente un gruppo con tutte le entità di un dominio specifico in un'area, escludendo entità specificate
+  name: Gruppo Dinamico per Dominio e Area (senza Python)
+  description: Crea e aggiorna automaticamente un gruppo con tutte le entità di un dominio specifico in un'area usando solo automazioni native
   domain: automation
   input:
     target_domain:
@@ -21,11 +21,10 @@ blueprint:
         text:
     excluded_entities:
       name: Entità da Escludere
-      description: Lista delle entità da escludere (una per riga)
+      description: Lista delle entità da escludere (separate da virgola)
       default: ""
       selector:
         text:
-          multiline: true
     update_interval:
       name: Intervallo di Aggiornamento
       description: Intervallo di aggiornamento in minuti
@@ -36,74 +35,94 @@ blueprint:
           max: 1440
           unit_of_measurement: "minuti"
 
+variables:
+  domain: !input target_domain
+  area_name: !input target_area  
+  group_id: !input group_name
+  excluded_list: !input excluded_entities
+  # Converti la stringa delle entità escluse in una lista
+  excluded_entities: >-
+    {% if excluded_list %}
+      {{ excluded_list.split(',') | map('trim') | list }}
+    {% else %}
+      []
+    {% endif %}
+  # Template per trovare tutte le entità del dominio nell'area specifica
+  matching_entities: >-
+    {% set ns = namespace(entities=[]) %}
+    {% for entity_id, entity in states | dictsort %}
+      {% if entity_id.startswith(domain + '.') %}
+        {% set area = area_name(entity_id) %}
+        {% if area == area_name and entity_id not in excluded_entities %}
+          {% set ns.entities = ns.entities + [entity_id] %}
+        {% endif %}
+      {% endif %}
+    {% endfor %}
+    {{ ns.entities }}
+
 trigger:
   - platform: time_pattern
     minutes: !input update_interval
   - platform: homeassistant
     event: start
+  - platform: event
+    event_type: area_registry_updated
+  - platform: event
+    event_type: entity_registry_updated
+
+condition:
+  - condition: template
+    value_template: "{{ matching_entities | length > 0 }}"
 
 action:
-  - service: python_script.update_dynamic_group
+  - service: group.set
     data:
-      domain: !input target_domain
-      area: !input target_area
-      group_name: !input group_name
-      excluded_entities: !input excluded_entities
+      object_id: "{{ group_id }}"
+      name: "Gruppo {{ domain | title }} - {{ area_name }}"
+      entities: "{{ matching_entities }}"
+      icon: "mdi:folder-multiple"
+  - service: logbook.log
+    data:
+      name: "Gruppo Dinamico"
+      message: >-
+        Gruppo '{{ group_id }}' aggiornato con {{ matching_entities | length }} entità: 
+        {{ matching_entities | join(', ') }}
 
 ---
-# Python Script da salvare in /config/python_scripts/update_dynamic_group.py
+# Alternativa con template sensor per monitoraggio (opzionale)
+# Aggiungi questa configurazione in configuration.yaml per monitorare il gruppo:
 
-# Contenuto del file update_dynamic_group.py:
-"""
-domain = data.get('domain')
-area_name = data.get('area')
-group_name = data.get('group_name', 'gruppo_dinamico')
-excluded_entities_str = data.get('excluded_entities', '')
-
-# Parsing delle entità da escludere
-excluded_entities = []
-if excluded_entities_str:
-    excluded_entities = [entity.strip() for entity in excluded_entities_str.split('\n') if entity.strip()]
-
-# Trova l'area per nome
-area_registry = hass.helpers.area_registry.async_get(hass)
-target_area = None
-for area in area_registry.areas.values():
-    if area.name == area_name:
-        target_area = area
-        break
-
-if not target_area:
-    logger.error(f"Area '{area_name}' non trovata")
-    exit()
-
-# Ottieni il registro delle entità
-entity_registry = hass.helpers.entity_registry.async_get(hass)
-
-# Trova tutte le entità del dominio nell'area
-matching_entities = []
-for entity in entity_registry.entities.values():
-    # Controlla se l'entità appartiene al dominio specificato
-    if entity.entity_id.startswith(f"{domain}."):
-        # Controlla se l'entità è nell'area target
-        if entity.area_id == target_area.id:
-            # Escludi le entità nella lista di esclusione
-            if entity.entity_id not in excluded_entities:
-                # Verifica che l'entità esista ancora in Home Assistant
-                if hass.states.get(entity.entity_id) is not None:
-                    matching_entities.append(entity.entity_id)
-
-# Crea o aggiorna il gruppo
-if matching_entities:
-    service_data = {
-        'object_id': group_name,
-        'name': f"Gruppo {domain.title()} - {area_name}",
-        'entities': matching_entities,
-        'icon': 'mdi:folder-multiple'
-    }
-    
-    hass.services.call('group', 'set', service_data)
-    logger.info(f"Gruppo '{group_name}' aggiornato con {len(matching_entities)} entità: {matching_entities}")
-else:
-    logger.warning(f"Nessuna entità trovata per dominio '{domain}' nell'area '{area_name}'")
-"""
+template:
+  - sensor:
+      - name: "Contatore Entità Gruppo Dinamico"
+        unique_id: "contatore_gruppo_dinamico"
+        state: >-
+          {% set domain = 'light' %}  # Cambia con il tuo dominio
+          {% set area_name = 'Salotto' %}  # Cambia con la tua area
+          {% set excluded = [] %}  # Aggiungi entità da escludere
+          {% set ns = namespace(count=0) %}
+          {% for entity_id, entity in states | dictsort %}
+            {% if entity_id.startswith(domain + '.') %}
+              {% set area = area_name(entity_id) %}
+              {% if area == area_name and entity_id not in excluded %}
+                {% set ns.count = ns.count + 1 %}
+              {% endif %}
+            {% endif %}
+          {% endfor %}
+          {{ ns.count }}
+        attributes:
+          entities: >-
+            {% set domain = 'light' %}  # Cambia con il tuo dominio
+            {% set area_name = 'Salotto' %}  # Cambia con la tua area
+            {% set excluded = [] %}  # Aggiungi entità da escludere
+            {% set ns = namespace(entities=[]) %}
+            {% for entity_id, entity in states | dictsort %}
+              {% if entity_id.startswith(domain + '.') %}
+                {% set area = area_name(entity_id) %}
+                {% if area == area_name and entity_id not in excluded %}
+                  {% set ns.entities = ns.entities + [entity_id] %}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.entities }}
+        icon: mdi:counter
