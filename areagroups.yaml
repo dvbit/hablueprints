@@ -1,0 +1,61 @@
+blueprint:
+  name: Crea/Aggiorna gruppo per area (dominio + esclusioni + frequenza)
+  description: >
+    Crea o aggiorna dinamicamente un gruppo contenente tutte le entità di un determinato dominio in una specifica area.
+    Include possibilità di esclusioni e frequenza di aggiornamento.
+  domain: automation
+  input:
+    target_area:
+      name: Area
+      selector:
+        area: {}
+    domain_type:
+      name: Dominio
+      default: light
+      selector:
+        text:
+    update_interval:
+      name: Frequenza aggiornamento (minuti)
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 1440
+          unit_of_measurement: minuti
+    excluded_entities:
+      name: Entità da escludere
+      default: []
+      selector:
+        entity:
+          multiple: true
+
+trigger:
+  - platform: homeassistant
+    event: start
+  - platform: time_pattern
+    minutes: "/{{ update_interval }}"
+
+variables:
+  area_id: !input target_area
+  domain_type: !input domain_type
+  update_interval: !input update_interval
+  excluded_entities: !input excluded_entities
+  area_slug: "{{ area_name(area_id) | lower | replace(' ', '_') | replace('-', '_') }}"
+  group_id: "{{ domain_type }}_{{ area_slug }}"
+
+action:
+  - service: group.set
+    data:
+      object_id: "{{ group_id }}"
+      name: "{{ domain_type.capitalize() }} {{ area_name(area_id) }}"
+      entities: >
+        {% set domain_entities = states[domain_type] %}
+        {% set filtered = domain_entities
+          | selectattr('attributes.area_id', 'defined')
+          | selectattr('attributes.area_id', 'eq', area_id)
+          | map(attribute='entity_id')
+          | reject('in', excluded_entities)
+          | list %}
+        {{ filtered }}
+
+mode: single
