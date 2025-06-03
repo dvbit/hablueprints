@@ -1,6 +1,6 @@
 blueprint:
   name: Gruppo Dinamico per Dominio e Area 
-  description: Crea e aggiorna automaticamente un gruppo con tutte le entità di un dominio specifico in un'area usando solo automazioni native. Escludi Entita marcate come non visibili da UI
+  description: Crea e aggiorna automaticamente un gruppo con tutte le entità di un dominio specifico in un'area usando solo automazioni native
   domain: automation
   input:
     target_domain:
