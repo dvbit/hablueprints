@@ -1,6 +1,6 @@
 blueprint:
-  name: Gruppo Dinamico per Dominio e Area (senza Python)
-  description: Crea e aggiorna automaticamente un gruppo con tutte le entità di un dominio specifico in un'area usando solo automazioni native
+  name: Gruppo Dinamico per Dominio e Area 
+  description: Crea e aggiorna automaticamente un gruppo con tutte le entità di un dominio specifico in un'area usando solo automazioni native. Escludi Entita marcate come non visibili da UI
   domain: automation
   input:
     target_domain:
@@ -50,11 +50,15 @@ variables:
   # Template per trovare tutte le entità del dominio nell'area specifica
   matching_entities: >-
     {% set ns = namespace(entities=[]) %}
-    {% for entity_id, entity in states | dictsort %}
+    {% for entity_id in states | map(attribute='entity_id') | list %}
       {% if entity_id.startswith(domain + '.') %}
-        {% set area = area_name(entity_id) %}
-        {% if area == area_name and entity_id not in excluded_entities %}
-          {% set ns.entities = ns.entities + [entity_id] %}
+        {% set device_id = device_id(entity_id) %}
+        {% if device_id and area_id(device_id) == area_name %}
+          {% if entity_id not in excluded_entities %}
+            {% if not is_hidden_entity(entity_id) %}
+              {% set ns.entities = ns.entities + [entity_id] %}
+            {% endif %}
+          {% endif %}
         {% endif %}
       {% endif %}
     {% endfor %}
@@ -87,3 +91,50 @@ action:
       message: >-
         Gruppo '{{ group_id }}' aggiornato con {{ matching_entities | length }} entità: 
         {{ matching_entities | join(', ') }}
+
+---
+# Alternativa con template sensor per monitoraggio (opzionale)
+# Aggiungi questa configurazione in configuration.yaml per monitorare il gruppo:
+
+template:
+  - sensor:
+      - name: "Contatore Entità Gruppo Dinamico"
+        unique_id: "contatore_gruppo_dinamico"
+        state: >-
+          {% set domain = 'light' %}
+          {% set target_area = 'Salotto' %}
+          {% set excluded = [] %}
+          {% set ns = namespace(count=0) %}
+          {% for entity_id in states | map(attribute='entity_id') | list %}
+            {% if entity_id.startswith(domain + '.') %}
+              {% set device_id = device_id(entity_id) %}
+              {% if device_id and area_id(device_id) == target_area %}
+                {% if entity_id not in excluded %}
+                  {% if not is_hidden_entity(entity_id) %}
+                    {% set ns.count = ns.count + 1 %}
+                  {% endif %}
+                {% endif %}
+              {% endif %}
+            {% endif %}
+          {% endfor %}
+          {{ ns.count }}
+        attributes:
+          entities: >-
+            {% set domain = 'light' %}
+            {% set target_area = 'Salotto' %}
+            {% set excluded = [] %}
+            {% set ns = namespace(entities=[]) %}
+            {% for entity_id in states | map(attribute='entity_id') | list %}
+              {% if entity_id.startswith(domain + '.') %}
+                {% set device_id = device_id(entity_id) %}
+                {% if device_id and area_id(device_id) == target_area %}
+                  {% if entity_id not in excluded %}
+                    {% if not is_hidden_entity(entity_id) %}
+                      {% set ns.entities = ns.entities + [entity_id] %}
+                    {% endif %}
+                  {% endif %}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.entities }}
+        icon: mdi:counter
