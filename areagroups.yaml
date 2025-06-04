@@ -1,5 +1,5 @@
 blueprint:
-  name: Gruppo Dinamico per Dominio e Area (senza Python)
+  name: Gruppo Dinamico per Dominio e Area (Multiple) e Label (Multiple)
   description: Crea e aggiorna automaticamente un gruppo con tutte le entità di un dominio specifico in un'area usando solo automazioni native
   domain: automation
   input:
@@ -26,6 +26,13 @@ blueprint:
       default: ""
       selector:
         text:
+    target_labels:
+      name: Label Target (Opzionale)
+      description: Seleziona le label da includere (lascia vuoto per ignorare i label)
+      default: []
+      selector:
+        label:
+          multiple: true
     update_interval:
       name: Intervallo di Aggiornamento
       description: Intervallo di aggiornamento in minuti
@@ -41,6 +48,7 @@ variables:
   selected_areas: !input target_area  
   group_id: !input group_name
   excluded_list: !input excluded_entities
+  selected_labels: !input target_labels
   # Converti la stringa delle entità escluse in una lista
   excluded_entities: >-
     {% if excluded_list %}
@@ -48,7 +56,7 @@ variables:
     {% else %}
       []
     {% endif %}
-  # Template per trovare tutte le entità del dominio nelle aree specificate
+  # Template per trovare tutte le entità del dominio nelle aree specificate con label opzionali
   matching_entities: >-
     {% set ns = namespace(entities=[]) %}
     {% for entity_id in states | map(attribute='entity_id') | list %}
@@ -59,7 +67,10 @@ variables:
           {% if entity_area_id in selected_areas %}
             {% if entity_id not in excluded_entities %}
               {% if not is_hidden_entity(entity_id) %}
-                {% set ns.entities = ns.entities + [entity_id] %}
+                {% set entity_labels = entity_labels(entity_id) %}
+                {% if selected_labels | length == 0 or (entity_labels and (entity_labels | intersect(selected_labels) | length > 0)) %}
+                  {% set ns.entities = ns.entities + [entity_id] %}
+                {% endif %}
               {% endif %}
             {% endif %}
           {% endif %}
@@ -86,12 +97,76 @@ action:
   - service: group.set
     data:
       object_id: "{{ group_id }}"
-      name: "Gruppo {{ domain | title }} - {{ selected_areas | join(', ') }}"
+      name: >-
+        Gruppo {{ domain | title }} - {{ selected_areas | join(', ') }}
+        {%- if selected_labels | length > 0 %} [{{ selected_labels | join(', ') }}]{% endif %}
       entities: "{{ matching_entities }}"
       icon: "mdi:folder-multiple"
   - service: logbook.log
     data:
       name: "Gruppo Dinamico"
       message: >-
-        Gruppo '{{ group_id }}' aggiornato con {{ matching_entities | length }} entità dalle aree {{ selected_areas | join(', ') }}: 
+        Gruppo '{{ group_id }}' aggiornato con {{ matching_entities | length }} entità dalle aree {{ selected_areas | join(', ') }}
+        {%- if selected_labels | length > 0 %} con label {{ selected_labels | join(', ') }}{% endif %}: 
         {{ matching_entities | join(', ') }}
+
+---
+# Alternativa con template sensor per monitoraggio (opzionale)
+# Aggiungi questa configurazione in configuration.yaml per monitorare il gruppo:
+
+template:
+  - sensor:
+      - name: "Contatore Entità Gruppo Dinamico"
+        unique_id: "contatore_gruppo_dinamico"
+        state: >-
+          {% set domain = 'light' %}
+          {% set target_areas = ['Salotto', 'Cucina'] %}
+          {% set target_labels = ['smart', 'dimmerabile'] %}
+          {% set excluded = [] %}
+          {% set ns = namespace(count=0) %}
+          {% for entity_id in states | map(attribute='entity_id') | list %}
+            {% if entity_id.startswith(domain + '.') %}
+              {% set entity_device_id = device_id(entity_id) %}
+              {% if entity_device_id %}
+                {% set entity_area_id = area_id(entity_device_id) %}
+                {% if entity_area_id in target_areas %}
+                  {% if entity_id not in excluded %}
+                    {% if not is_hidden_entity(entity_id) %}
+                      {% set entity_label_list = entity_labels(entity_id) %}
+                      {% if target_labels | length == 0 or (entity_label_list and (entity_label_list | intersect(target_labels) | length > 0)) %}
+                        {% set ns.count = ns.count + 1 %}
+                      {% endif %}
+                    {% endif %}
+                  {% endif %}
+                {% endif %}
+              {% endif %}
+            {% endif %}
+          {% endfor %}
+          {{ ns.count }}
+        attributes:
+          entities: >-
+            {% set domain = 'light' %}
+            {% set target_areas = ['Salotto', 'Cucina'] %}
+            {% set target_labels = ['smart', 'dimmerabile'] %}
+            {% set excluded = [] %}
+            {% set ns = namespace(entities=[]) %}
+            {% for entity_id in states | map(attribute='entity_id') | list %}
+              {% if entity_id.startswith(domain + '.') %}
+                {% set entity_device_id = device_id(entity_id) %}
+                {% if entity_device_id %}
+                  {% set entity_area_id = area_id(entity_device_id) %}
+                  {% if entity_area_id in target_areas %}
+                    {% if entity_id not in excluded %}
+                      {% if not is_hidden_entity(entity_id) %}
+                        {% set entity_label_list = entity_labels(entity_id) %}
+                        {% if target_labels | length == 0 or (entity_label_list and (entity_label_list | intersect(target_labels) | length > 0)) %}
+                          {% set ns.entities = ns.entities + [entity_id] %}
+                        {% endif %}
+                      {% endif %}
+                    {% endif %}
+                  {% endif %}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.entities }}
+        icon: mdi:counter
