@@ -17,7 +17,7 @@ blueprint:
     group_name:
       name: Nome del Gruppo
       description: Nome del gruppo da creare/aggiornare
-      default: "gruppo_dinamico"
+      default: "gruppo_dinamico" 
       selector:
         text:
     excluded_entities:
