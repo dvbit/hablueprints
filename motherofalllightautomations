@@ -1,0 +1,526 @@
+blueprint:
+  name: Smart Lighting Control System
+  description: >
+    Comprehensive lighting automation with movement/occupancy detection, manual overrides,
+    and support for default and courtesy lights with full customization options.
+  domain: automation
+  author: Assistant
+  
+  input:
+    # Required Sensors
+    lux_sensor:
+      name: Lux Sensor
+      description: Sensor that measures ambient light level
+      selector:
+        entity:
+          domain: sensor
+          device_class: illuminance
+    
+    movement_sensor:
+      name: Movement Sensor
+      description: Binary sensor that detects movement
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: motion
+    
+    # Optional Sensors
+    occupation_sensor:
+      name: Occupation Sensor (Optional)
+      description: Binary sensor that detects room occupation
+      default: ""
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: occupancy
+    
+    # Default Light Components
+    default_bulb:
+      name: Default Smart Bulb (Optional)
+      description: Smart bulb for main lighting
+      default: ""
+      selector:
+        entity:
+          domain: light
+    
+    default_switch:
+      name: Default Switch/Relay (Optional)
+      description: Switch or relay connected to the default bulb
+      default: ""
+      selector:
+        entity:
+          domain: switch
+    
+    default_switch_clicks:
+      name: Default Switch Click Counter (Optional)
+      description: Sensor that counts clicks on the default switch
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+    
+    # Courtesy Light Components
+    courtesy_bulb:
+      name: Courtesy Smart Bulb (Optional)
+      description: Smart bulb for courtesy lighting
+      default: ""
+      selector:
+        entity:
+          domain: light
+    
+    courtesy_switch:
+      name: Courtesy Switch/Relay (Optional)
+      description: Switch or relay connected to the courtesy bulb
+      default: ""
+      selector:
+        entity:
+          domain: switch
+    
+    courtesy_switch_clicks:
+      name: Courtesy Switch Click Counter (Optional)
+      description: Sensor that counts clicks on the courtesy switch
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+    
+    # Light Thresholds
+    insufficient_light_threshold:
+      name: Insufficient Light Threshold
+      description: Lux level below which lights should turn on
+      default: 100
+      selector:
+        number:
+          min: 0
+          max: 1000
+          step: 10
+          unit_of_measurement: "lux"
+    
+    sufficient_light_threshold:
+      name: Sufficient Light Threshold
+      description: Lux level above which lights should turn off
+      default: 200
+      selector:
+        number:
+          min: 0
+          max: 1000
+          step: 10
+          unit_of_measurement: "lux"
+    
+    # Timing Configuration
+    absence_timeout:
+      name: Absence Timeout
+      description: Minutes to wait before turning off lights after no movement/occupancy
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 60
+          step: 1
+          unit_of_measurement: "minutes"
+    
+    override_timeout:
+      name: Override Timeout
+      description: Minutes to wait before re-enabling automation after single click override
+      default: 15
+      selector:
+        number:
+          min: 1
+          max: 120
+          step: 1
+          unit_of_measurement: "minutes"
+    
+    # Default Light Settings
+    default_light_enabled:
+      name: Enable Default Light
+      description: Whether to use the default light
+      default: true
+      selector:
+        boolean:
+    
+    default_brightness:
+      name: Default Light Brightness
+      description: Brightness level for default light (1-255)
+      default: 255
+      selector:
+        number:
+          min: 1
+          max: 255
+          step: 1
+    
+    default_temperature:
+      name: Default Light Color Temperature
+      description: Color temperature for default light (153-500 mireds)
+      default: 250
+      selector:
+        number:
+          min: 153
+          max: 500
+          step: 1
+    
+    default_supports_color:
+      name: Default Light Supports RGB Color
+      description: Whether the default bulb supports RGB colors
+      default: false
+      selector:
+        boolean:
+    
+    default_color:
+      name: Default Light RGB Color
+      description: RGB color for default light (if supported)
+      default: [255, 255, 255]
+      selector:
+        color_rgb:
+    
+    # Courtesy Light Settings
+    courtesy_light_enabled:
+      name: Enable Courtesy Light
+      description: Whether to use the courtesy light
+      default: false
+      selector:
+        boolean:
+    
+    courtesy_brightness:
+      name: Courtesy Light Brightness
+      description: Brightness level for courtesy light (1-255)
+      default: 128
+      selector:
+        number:
+          min: 1
+          max: 255
+          step: 1
+    
+    courtesy_temperature:
+      name: Courtesy Light Color Temperature
+      description: Color temperature for courtesy light (153-500 mireds)
+      default: 400
+      selector:
+        number:
+          min: 153
+          max: 500
+          step: 1
+    
+    courtesy_supports_color:
+      name: Courtesy Light Supports RGB Color
+      description: Whether the courtesy bulb supports RGB colors
+      default: false
+      selector:
+        boolean:
+    
+    courtesy_color:
+      name: Courtesy Light RGB Color
+      description: RGB color for courtesy light (if supported)
+      default: [255, 200, 100]
+      selector:
+        color_rgb:
+    
+    # Notification Settings
+    notifications_enabled:
+      name: Enable Notifications
+      description: Whether to send notifications for overrides
+      default: true
+      selector:
+        boolean:
+    
+    notification_device:
+      name: Notification Service
+      description: Notification service to use (e.g., mobile_app_phone, notify)
+      default: "notify"
+      selector:
+        text:
+    
+    # Area Name for Notifications
+    area_name:
+      name: Area Name
+      description: Name of the area for notification messages
+      default: "Room"
+      selector:
+        text:
+
+variables:
+  # Convert blueprint inputs to variables for easier use
+  has_occupation_sensor: "{{ occupation_sensor != '' }}"
+  has_default_bulb: "{{ default_bulb != '' }}"
+  has_default_switch: "{{ default_switch != '' }}"
+  has_courtesy_bulb: "{{ courtesy_bulb != '' }}"
+  has_courtesy_switch: "{{ courtesy_switch != '' }}"
+  has_default_clicks: "{{ default_switch_clicks != '' }}"
+  has_courtesy_clicks: "{{ courtesy_switch_clicks != '' }}"
+  
+  # Light condition checks
+  light_insufficient: "{{ states(lux_sensor) | float(0) < insufficient_light_threshold }}"
+  light_sufficient: "{{ states(lux_sensor) | float(0) > sufficient_light_threshold }}"
+  
+  # Movement/occupancy status
+  movement_detected: "{{ is_state(movement_sensor, 'on') }}"
+  occupancy_detected: "{{ has_occupation_sensor and is_state(occupation_sensor, 'on') }}"
+  
+  # Use occupancy if available, otherwise movement
+  presence_detected: "{{ occupancy_detected if has_occupation_sensor else movement_detected }}"
+
+trigger:
+  # Movement/Occupancy triggers
+  - platform: state
+    entity_id: !input movement_sensor
+    to: 'on'
+    id: movement_on
+  
+  - platform: state
+    entity_id: !input movement_sensor
+    to: 'off'
+    for:
+      minutes: !input absence_timeout
+    id: movement_timeout
+  
+  - platform: state
+    entity_id: !input occupation_sensor
+    to: 'on'
+    id: occupancy_on
+    enabled: "{{ occupation_sensor != '' }}"
+  
+  - platform: state
+    entity_id: !input occupation_sensor
+    to: 'off'
+    for:
+      minutes: !input absence_timeout
+    id: occupancy_timeout
+    enabled: "{{ occupation_sensor != '' }}"
+  
+  # Light level triggers
+  - platform: numeric_state
+    entity_id: !input lux_sensor
+    below: !input insufficient_light_threshold
+    id: light_low
+  
+  - platform: numeric_state
+    entity_id: !input lux_sensor
+    above: !input sufficient_light_threshold
+    id: light_high
+  
+  # Switch click triggers
+  - platform: state
+    entity_id: !input default_switch_clicks
+    id: default_click
+    enabled: "{{ default_switch_clicks != '' }}"
+  
+  - platform: state
+    entity_id: !input courtesy_switch_clicks
+    id: courtesy_click
+    enabled: "{{ courtesy_switch_clicks != '' }}"
+  
+  # Override timeout triggers
+  - platform: state
+    entity_id: !input movement_sensor
+    to: 'off'
+    for:
+      minutes: !input override_timeout
+    id: override_timeout_movement
+  
+  - platform: state
+    entity_id: !input occupation_sensor
+    to: 'off'
+    for:
+      minutes: !input override_timeout
+    id: override_timeout_occupancy
+    enabled: "{{ occupation_sensor != '' }}"
+
+action:
+  - choose:
+      # SCENARIO 1: Turn on lights when movement/occupancy detected and insufficient light
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: movement_on
+              - condition: trigger
+                id: occupancy_on
+              - condition: trigger
+                id: light_low
+          - condition: template
+            value_template: "{{ light_insufficient }}"
+          - condition: template
+            value_template: "{{ presence_detected }}"
+          - condition: template
+            value_template: "{{ not is_state('input_boolean.automation_override_' + area_name | replace(' ', '_') | lower, 'on') }}"
+          - condition: template
+            value_template: "{{ not is_state('input_boolean.automation_disabled_' + area_name | replace(' ', '_') | lower, 'on') }}"
+        sequence:
+          # Turn on default light
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ default_light_enabled and has_default_bulb and has_default_switch }}"
+                sequence:
+                  - service: switch.turn_on
+                    target:
+                      entity_id: !input default_switch
+                  - service: light.turn_on
+                    target:
+                      entity_id: !input default_bulb
+                    data:
+                      brightness: !input default_brightness
+                      color_temp: !input default_temperature
+                      rgb_color: >
+                        {% if default_supports_color %}
+                          {{ default_color }}
+                        {% endif %}
+          
+          # Turn on courtesy light
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ courtesy_light_enabled and has_courtesy_bulb and has_courtesy_switch }}"
+                sequence:
+                  - service: switch.turn_on
+                    target:
+                      entity_id: !input courtesy_switch
+                  - service: light.turn_on
+                    target:
+                      entity_id: !input courtesy_bulb
+                    data:
+                      brightness: !input courtesy_brightness
+                      color_temp: !input courtesy_temperature
+                      rgb_color: >
+                        {% if courtesy_supports_color %}
+                          {{ courtesy_color }}
+                        {% endif %}
+
+      # SCENARIO 2: Turn off lights when sufficient light or timeout
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: light_high
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: movement_timeout
+                  - condition: template
+                    value_template: "{{ not has_occupation_sensor }}"
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: occupancy_timeout
+                  - condition: template
+                    value_template: "{{ has_occupation_sensor }}"
+        sequence:
+          # Turn off all lights and switches
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ has_default_switch }}"
+                sequence:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: !input default_switch
+          
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ has_courtesy_switch }}"
+                sequence:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: !input courtesy_switch
+          
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ has_default_bulb }}"
+                sequence:
+                  - service: light.turn_off
+                    target:
+                      entity_id: !input default_bulb
+          
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ has_courtesy_bulb }}"
+                sequence:
+                  - service: light.turn_off
+                    target:
+                      entity_id: !input courtesy_bulb
+
+      # SCENARIO 3: Handle switch clicks for manual override
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: trigger
+                id: default_click
+              - condition: trigger
+                id: courtesy_click
+        sequence:
+          - choose:
+              # Single click - temporary override
+              - conditions:
+                  - condition: template
+                    value_template: "{{ trigger.to_state.state | int == 1 }}"
+                sequence:
+                  - service: input_boolean.turn_on
+                    target:
+                      entity_id: "input_boolean.automation_override_{{ area_name | replace(' ', '_') | lower }}"
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ notifications_enabled }}"
+                        sequence:
+                          - service: "{{ notification_device }}"
+                            data:
+                              message: "{{ area_name }} lighting automation temporarily overridden. Will resume after {{ override_timeout }} minutes of no activity."
+
+              # Double click - toggle permanent disable
+              - conditions:
+                  - condition: template
+                    value_template: "{{ trigger.to_state.state | int == 2 }}"
+                sequence:
+                  - service: input_boolean.toggle
+                    target:
+                      entity_id: "input_boolean.automation_disabled_{{ area_name | replace(' ', '_') | lower }}"
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ notifications_enabled }}"
+                        sequence:
+                          - service: "{{ notification_device }}"
+                            data:
+                              message: >
+                                {% set disabled_entity = 'input_boolean.automation_disabled_' + area_name | replace(' ', '_') | lower %}
+                                {% if is_state(disabled_entity, 'on') %}
+                                  {{ area_name }} lighting automation disabled until double-click or Home Assistant restart.
+                                {% else %}
+                                  {{ area_name }} lighting automation re-enabled.
+                                {% endif %}
+
+      # SCENARIO 4: Handle override timeout - re-enable automation
+      - conditions:
+          - condition: or
+            conditions:
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: override_timeout_movement
+                  - condition: template
+                    value_template: "{{ not has_occupation_sensor }}"
+              - condition: and
+                conditions:
+                  - condition: trigger
+                    id: override_timeout_occupancy
+                  - condition: template
+                    value_template: "{{ has_occupation_sensor }}"
+          - condition: template
+            value_template: "{{ is_state('input_boolean.automation_override_' + area_name | replace(' ', '_') | lower, 'on') }}"
+        sequence:
+          - service: input_boolean.turn_off
+            target:
+              entity_id: "input_boolean.automation_override_{{ area_name | replace(' ', '_') | lower }}"
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ notifications_enabled }}"
+                sequence:
+                  - service: "{{ notification_device }}"
+                    data:
+                      message: "{{ area_name }} automation override has expired. Lighting control is now active again."
+
+mode: queued
+max_exceeded: silent
