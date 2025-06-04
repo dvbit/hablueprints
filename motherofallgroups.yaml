@@ -1,6 +1,6 @@
 blueprint:
-  name: Gruppo Dinamico per Dominio e Area (senza Python)
-  description: Crea e aggiorna automaticamente un gruppo con tutte le entità di un dominio specifico in un'area usando solo automazioni native
+  name: Gruppo Dinamico per Dominio, Area, Label, entità (e suo stato). Se esiste il relativo contatore aggiorna anche quello. Escludi le entita non visualizzate in UI
+  description: Crea e aggiorna automaticamente un gruppo con tutte le entità di un dominio specifico in un area usando solo automazioni native
   domain: automation
   input:
     target_domain:
@@ -56,6 +56,12 @@ blueprint:
       default: true
       selector:
         boolean:
+    entity_state_filter:
+      name: Filtro Stato Entità (Opzionale)
+      description: Includi solo entità con uno stato specifico (es. 'on', 'off', 'open', 'closed')
+      default: ""
+      selector:
+        text:
 
 variables:
   domain: !input target_domain
@@ -65,6 +71,7 @@ variables:
   selected_labels: !input target_labels
   selected_floors: !input target_floors
   create_sensor: !input create_counter_sensor
+  state_filter: !input entity_state_filter
   # Converti la stringa delle entità escluse in una lista
   excluded_entities: >-
     {% if excluded_list %}
@@ -72,7 +79,7 @@ variables:
     {% else %}
       []
     {% endif %}
-  # Template per trovare tutte le entità del dominio nelle aree/piani specificate con label opzionali
+  # Template per trovare tutte le entità del dominio nelle aree/piani specificate con label e stato opzionali
   matching_entities: >-
     {% set ns = namespace(entities=[]) %}
     {% for entity_id in states | map(attribute='entity_id') | list %}
@@ -89,8 +96,15 @@ variables:
             {% if entity_id not in excluded_entities %}
               {% if not is_hidden_entity(entity_id) %}
                 {% set entity_label_list = entity_labels(entity_id) %}
-                {% if selected_labels | length == 0 or (entity_label_list and (entity_label_list | intersect(selected_labels) | length > 0)) %}
-                  {% set ns.entities = ns.entities + [entity_id] %}
+                {% set label_match = selected_labels | length == 0 or (entity_label_list and (entity_label_list | intersect(selected_labels) | length > 0)) %}
+                
+                {% if label_match %}
+                  {% set entity_state = states(entity_id) %}
+                  {% set state_match = state_filter == '' or entity_state == state_filter %}
+                  
+                  {% if state_match %}
+                    {% set ns.entities = ns.entities + [entity_id] %}
+                  {% endif %}
                 {% endif %}
               {% endif %}
             {% endif %}
@@ -123,6 +137,7 @@ action:
         {%- if selected_floors | length > 0 %} - Piani: {{ selected_floors | join(', ') }}{% endif %}
         {%- if selected_areas | length > 0 %} - Aree: {{ selected_areas | join(', ') }}{% endif %}
         {%- if selected_labels | length > 0 %} [{{ selected_labels | join(', ') }}]{% endif %}
+        {%- if state_filter != '' %} ({{ state_filter }}){% endif %}
       entities: "{{ matching_entities }}"
       icon: "mdi:folder-multiple"
   
@@ -151,5 +166,6 @@ action:
         {%- if selected_floors | length > 0 %} dai piani {{ selected_floors | join(', ') }}{% endif %}
         {%- if selected_areas | length > 0 %} dalle aree {{ selected_areas | join(', ') }}{% endif %}
         {%- if selected_labels | length > 0 %} con label {{ selected_labels | join(', ') }}{% endif %}
+        {%- if state_filter != '' %} con stato '{{ state_filter }}'{% endif %}
         {%- if create_sensor %} - Sensor contatore creato: sensor.{{ group_id }}_count{% endif %}: 
         {{ matching_entities | join(', ') }}
