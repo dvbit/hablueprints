@@ -1,5 +1,5 @@
 blueprint:
-  name: Gruppo Dinamico per Dominio e Area (Multiple) e Label (Multiple)
+  name: Gruppo Dinamico per Dominio e Area (senza Python)
   description: Crea e aggiorna automaticamente un gruppo con tutte le entità di un dominio specifico in un'area usando solo automazioni native
   domain: automation
   input:
@@ -9,15 +9,16 @@ blueprint:
       selector:
         text:
     target_area:
-      name: Aree Target
-      description: Seleziona una o più aree da cui prendere le entità
+      name: Aree Target (Opzionale)
+      description: Seleziona una o più aree da cui prendere le entità (lascia vuoto per tutte le aree)
+      default: []
       selector:
         area:
           multiple: true
     group_name:
       name: Nome del Gruppo
       description: Nome del gruppo da creare/aggiornare
-      default: "gruppo_dinamico" 
+      default: "gruppo_dinamico"
       selector:
         text:
     excluded_entities:
@@ -33,6 +34,13 @@ blueprint:
       selector:
         label:
           multiple: true
+    target_floors:
+      name: Piani Target (Opzionale)
+      description: Seleziona i piani da includere (lascia vuoto per ignorare i piani)
+      default: []
+      selector:
+        floor:
+          multiple: true
     update_interval:
       name: Intervallo di Aggiornamento
       description: Intervallo di aggiornamento in minuti
@@ -42,6 +50,12 @@ blueprint:
           min: 1
           max: 1440
           unit_of_measurement: "minuti"
+    create_counter_sensor:
+      name: Crea Sensor Contatore
+      description: Crea un template sensor che conta le entità del gruppo
+      default: true
+      selector:
+        boolean:
 
 variables:
   domain: !input target_domain
@@ -49,6 +63,8 @@ variables:
   group_id: !input group_name
   excluded_list: !input excluded_entities
   selected_labels: !input target_labels
+  selected_floors: !input target_floors
+  create_sensor: !input create_counter_sensor
   # Converti la stringa delle entità escluse in una lista
   excluded_entities: >-
     {% if excluded_list %}
@@ -56,7 +72,7 @@ variables:
     {% else %}
       []
     {% endif %}
-  # Template per trovare tutte le entità del dominio nelle aree specificate con label opzionali
+  # Template per trovare tutte le entità del dominio nelle aree/piani specificate con label opzionali
   matching_entities: >-
     {% set ns = namespace(entities=[]) %}
     {% for entity_id in states | map(attribute='entity_id') | list %}
@@ -64,11 +80,16 @@ variables:
         {% set entity_device_id = device_id(entity_id) %}
         {% if entity_device_id %}
           {% set entity_area_id = area_id(entity_device_id) %}
-          {% if entity_area_id in selected_areas %}
+          {% set area_floor_id = floor_id(entity_area_id) %}
+          
+          {% set area_match = selected_areas | length == 0 or entity_area_id in selected_areas %}
+          {% set floor_match = selected_floors | length == 0 or area_floor_id in selected_floors %}
+          
+          {% if area_match and floor_match %}
             {% if entity_id not in excluded_entities %}
               {% if not is_hidden_entity(entity_id) %}
-                {% set entity_labels = entity_labels(entity_id) %}
-                {% if selected_labels | length == 0 or (entity_labels and (entity_labels | intersect(selected_labels) | length > 0)) %}
+                {% set entity_label_list = entity_labels(entity_id) %}
+                {% if selected_labels | length == 0 or (entity_label_list and (entity_label_list | intersect(selected_labels) | length > 0)) %}
                   {% set ns.entities = ns.entities + [entity_id] %}
                 {% endif %}
               {% endif %}
@@ -98,14 +119,37 @@ action:
     data:
       object_id: "{{ group_id }}"
       name: >-
-        Gruppo {{ domain | title }} - {{ selected_areas | join(', ') }}
+        Gruppo {{ domain | title }}
+        {%- if selected_floors | length > 0 %} - Piani: {{ selected_floors | join(', ') }}{% endif %}
+        {%- if selected_areas | length > 0 %} - Aree: {{ selected_areas | join(', ') }}{% endif %}
         {%- if selected_labels | length > 0 %} [{{ selected_labels | join(', ') }}]{% endif %}
       entities: "{{ matching_entities }}"
       icon: "mdi:folder-multiple"
+  
+  - if:
+      - condition: template
+        value_template: "{{ create_sensor }}"
+    then:
+      - service: template.reload
+      - delay:
+          seconds: 2
+      - service: recorder.purge_entities
+        data:
+          entity_ids:
+            - "sensor.{{ group_id }}_count"
+        continue_on_error: true
+      - service: homeassistant.reload_config_entry
+        target:
+          entity_id: "sensor.{{ group_id }}_count"
+        continue_on_error: true
+  
   - service: logbook.log
     data:
       name: "Gruppo Dinamico"
       message: >-
-        Gruppo '{{ group_id }}' aggiornato con {{ matching_entities | length }} entità dalle aree {{ selected_areas | join(', ') }}
-        {%- if selected_labels | length > 0 %} con label {{ selected_labels | join(', ') }}{% endif %}: 
+        Gruppo '{{ group_id }}' aggiornato con {{ matching_entities | length }} entità
+        {%- if selected_floors | length > 0 %} dai piani {{ selected_floors | join(', ') }}{% endif %}
+        {%- if selected_areas | length > 0 %} dalle aree {{ selected_areas | join(', ') }}{% endif %}
+        {%- if selected_labels | length > 0 %} con label {{ selected_labels | join(', ') }}{% endif %}
+        {%- if create_sensor %} - Sensor contatore creato: sensor.{{ group_id }}_count{% endif %}: 
         {{ matching_entities | join(', ') }}
