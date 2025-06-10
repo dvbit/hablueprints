@@ -215,4 +215,3 @@ action:
         {%- if state_filter != '' %} con stato '{{ state_filter }}'{% endif %}
         {%- if create_sensor %} - Sensor contatore: sensor.{{ group_id }}_count{% endif %}: 
         {{ matching_entities | join(', ') }}
-
