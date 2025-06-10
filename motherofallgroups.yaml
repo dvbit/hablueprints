@@ -1,6 +1,6 @@
 blueprint:
-  name: Gruppo Dinamico per Dominio, Area, Label, entità (e suo stato). Se esiste il relativo contatore aggiorna anche quello. Escludi le entita non visualizzate in UI
-  description: Crea e aggiorna automaticamente un gruppo con tutte le entità di un dominio specifico in un area usando solo automazioni native
+  name: Gruppo Dinamico per Dominio e Area 
+  description: Crea e aggiorna automaticamente un gruppo con tutte le entità di un dominio specifico in un'area usando solo automazioni native
   domain: automation
   input:
     target_domain:
@@ -42,8 +42,8 @@ blueprint:
         floor:
           multiple: true
     update_interval:
-      name: Intervallo di Aggiornamento
-      description: Intervallo di aggiornamento in minuti
+      name: Intervallo di Aggiornamento (Deprecato)
+      description: Questo campo non è più utilizzato - il gruppo si aggiorna automaticamente
       default: 10
       selector:
         number:
@@ -115,18 +115,61 @@ variables:
     {{ ns.entities }}
 
 trigger:
-  - platform: time_pattern
-    minutes: !input update_interval
-  - platform: homeassistant
-    event: start
-  - platform: event
-    event_type: area_registry_updated
+  - platform: state
+    entity_id: >-
+      {{ states | selectattr('entity_id', 'match', '^' + domain + '\.') | map(attribute='entity_id') | list }}
+    id: "domain_state_change"
   - platform: event
     event_type: entity_registry_updated
+    event_data:
+      action: create
+    id: "entity_added"
+  - platform: event
+    event_type: entity_registry_updated
+    event_data:
+      action: remove
+    id: "entity_removed"
+  - platform: event
+    event_type: entity_registry_updated
+    event_data:
+      action: update
+    id: "entity_updated"
+  - platform: event
+    event_type: area_registry_updated
+    id: "area_updated"
+  - platform: event
+    event_type: device_registry_updated
+    id: "device_updated"
+  - platform: homeassistant
+    event: start
+    id: "ha_start"
 
 condition:
-  - condition: template
-    value_template: "{{ matching_entities | length > 0 }}"
+  - or:
+    - condition: trigger
+      id: "ha_start"
+    - condition: trigger
+      id: "area_updated"
+    - condition: trigger
+      id: "device_updated"
+    - condition: and
+      conditions:
+        - condition: trigger
+          id: 
+            - "entity_added"
+            - "entity_removed" 
+            - "entity_updated"
+        - condition: template
+          value_template: >-
+            {{ trigger.event.data.entity_id is defined and 
+               trigger.event.data.entity_id.startswith(domain + '.') }}
+    - condition: and
+      conditions:
+        - condition: trigger
+          id: "domain_state_change"
+        - condition: template
+          value_template: >-
+            {{ state_filter != '' and trigger.entity_id.startswith(domain + '.') }}
 
 action:
   - service: group.set
@@ -162,10 +205,150 @@ action:
     data:
       name: "Gruppo Dinamico"
       message: >-
-        Gruppo '{{ group_id }}' aggiornato con {{ matching_entities | length }} entità
+        Gruppo '{{ group_id }}' aggiornato per trigger: {{ trigger.id | default('unknown') }}
+        {%- if trigger.entity_id is defined %} (entità: {{ trigger.entity_id }}){% endif %}
+        {%- if trigger.event.data.entity_id is defined %} (entità: {{ trigger.event.data.entity_id }}){% endif %}
+        - {{ matching_entities | length }} entità totali
         {%- if selected_floors | length > 0 %} dai piani {{ selected_floors | join(', ') }}{% endif %}
         {%- if selected_areas | length > 0 %} dalle aree {{ selected_areas | join(', ') }}{% endif %}
         {%- if selected_labels | length > 0 %} con label {{ selected_labels | join(', ') }}{% endif %}
         {%- if state_filter != '' %} con stato '{{ state_filter }}'{% endif %}
-        {%- if create_sensor %} - Sensor contatore creato: sensor.{{ group_id }}_count{% endif %}: 
+        {%- if create_sensor %} - Sensor contatore: sensor.{{ group_id }}_count{% endif %}: 
         {{ matching_entities | join(', ') }}
+
+---
+# Template Sensor da aggiungere manualmente in configuration.yaml
+# (Il blueprint creerà automaticamente il gruppo, ma il sensor template va aggiunto manualmente)
+
+# Esempio di configurazione da aggiungere in configuration.yaml:
+template:
+  - sensor:
+      - name: "Contatore [NOME_GRUPPO]"
+        unique_id: "[NOME_GRUPPO]_count"
+        state: >-
+          {% set target_domain = 'light' %}
+          {% set target_areas = [] %}
+          {% set target_floors = [] %}
+          {% set target_labels = [] %}
+          {% set excluded = [] %}
+          {% set ns = namespace(count=0) %}
+          {% for entity_id in states | map(attribute='entity_id') | list %}
+            {% if entity_id.startswith(target_domain + '.') %}
+              {% set entity_device_id = device_id(entity_id) %}
+              {% if entity_device_id %}
+                {% set entity_area_id = area_id(entity_device_id) %}
+                {% set area_floor_id = floor_id(entity_area_id) %}
+                
+                {% set area_match = target_areas | length == 0 or entity_area_id in target_areas %}
+                {% set floor_match = target_floors | length == 0 or area_floor_id in target_floors %}
+                
+                {% if area_match and floor_match %}
+                  {% if entity_id not in excluded %}
+                    {% if not is_hidden_entity(entity_id) %}
+                      {% set entity_label_list = entity_labels(entity_id) %}
+                      {% if target_labels | length == 0 or (entity_label_list and (entity_label_list | intersect(target_labels) | length > 0)) %}
+                        {% set ns.count = ns.count + 1 %}
+                      {% endif %}
+                    {% endif %}
+                  {% endif %}
+                {% endif %}
+              {% endif %}
+            {% endif %}
+          {% endfor %}
+          {{ ns.count }}
+        attributes:
+          group_entities: >-
+            {% set target_domain = 'binary_sensor' %}
+            {% set target_areas = [] %}
+            {% set target_floors = [] %}
+            {% set target_labels = [] %}
+            {% set excluded = [] %}
+            {% set state_filter = 'on' %}
+            {% set ns = namespace(entities=[]) %}
+            {% for entity_id in states | map(attribute='entity_id') | list %}
+              {% if entity_id.startswith(target_domain + '.') %}
+                {% set entity_device_id = device_id(entity_id) %}
+                {% if entity_device_id %}
+                  {% set entity_area_id = area_id(entity_device_id) %}
+                  {% set area_floor_id = floor_id(entity_area_id) %}
+                  
+                  {% set area_match = target_areas | length == 0 or entity_area_id in target_areas %}
+                  {% set floor_match = target_floors | length == 0 or area_floor_id in target_floors %}
+                  
+                  {% if area_match and floor_match %}
+                    {% if entity_id not in excluded %}
+                      {% if not is_hidden_entity(entity_id) %}
+                        {% set entity_label_list = entity_labels(entity_id) %}
+                        {% set label_match = target_labels | length == 0 or (entity_label_list and (entity_label_list | intersect(target_labels) | length > 0)) %}
+                        
+                        {% if label_match %}
+                          {% set entity_state = states(entity_id) %}
+                          {% set state_match = state_filter == '' or entity_state == state_filter %}
+                          
+                          {% if state_match %}
+                            {% set ns.entities = ns.entities + [entity_id] %}
+                          {% endif %}
+                        {% endif %}
+                      {% endif %}
+                    {% endif %}
+                  {% endif %}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.entities }}
+          domain: "binary_sensor"
+          areas: "[]"
+          floors: "[]"
+          labels: "[]"
+          excluded: "[]"
+          state_filter: "on"
+        icon: mdi:counter
+        unit_of_measurement: "entità"
+
+# ISTRUZIONI PER L'USO:
+# 1. Copia la configurazione template sopra in configuration.yaml
+# 2. Sostituisci [NOME_GRUPPO] con il nome del tuo gruppo
+# 3. Aggiorna le variabili target_domain, target_areas, target_floors, target_labels, excluded con i valori del tuo blueprint
+# 4. Riavvia Home Assistant o ricarica i template
+# 5. Il sensor sarà disponibile come sensor.[nome_gruppo]_count
+
+# ESEMPI DI USO DEL FILTRO STATO:
+# 
+# Per porte aperte:
+#   - Dominio: binary_sensor (o sensor se usano device_class: door)
+#   - Filtro Stato: "on" (per porte aperte)
+#
+# Per luci accese:
+#   - Dominio: light
+#   - Filtro Stato: "on"
+#
+# Per dispositivi spenti:
+#   - Dominio: switch
+#   - Filtro Stato: "off"
+#
+# Per sensori di movimento attivi:
+#   - Dominio: binary_sensor
+#   - Label: "motion" (opzionale)
+#   - Filtro Stato: "on"
+#
+# Per finestre aperte:
+#   - Dominio: binary_sensor
+#   - Filtro Stato: "on"
+#
+# Per dispositivi con problemi di batteria:
+#   - Dominio: sensor
+#   - Filtro Stato: "low" (se il sensore restituisce "low")
+#
+# Per termostati in modalità riscaldamento:
+#   - Dominio: climate
+#   - Filtro Stato: "heat"
+
+# PERSONALIZZAZIONE DEL TEMPLATE SENSOR:
+# 1. Sostituisci target_domain con il dominio desiderato
+# 2. Configura target_areas, target_floors, target_labels come nel blueprint
+# 3. Imposta state_filter con lo stato desiderato:
+#    - "on" / "off" per entità binarie
+#    - "open" / "closed" per porte/finestre
+#    - "heat" / "cool" / "auto" per termostati
+#    - Valori numerici per sensori
+#    - Lascia vuoto ('') per non filtrare per stato
