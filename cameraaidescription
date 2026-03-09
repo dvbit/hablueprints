@@ -70,12 +70,20 @@ blueprint:
           domain: input_text
 
     # ── TRIGGER ───────────────────────────────────────────────────────────────
-    trigger_entity:
-      name: Trigger Entity (optional)
+    use_motion_trigger:
+      name: Use Motion Sensor Trigger
       description: >
-        Binary sensor that fires the automation on state change to "on".
-        Leave empty to use a time-pattern trigger.
-      default: ""
+        Enable this to trigger on a binary sensor instead of a time pattern.
+      default: false
+      selector:
+        boolean:
+
+    trigger_entity:
+      name: Trigger Entity
+      description: >
+        Binary sensor to trigger on (only used when Use Motion Sensor Trigger
+        is enabled).
+      default: "binary_sensor.placeholder"
       selector:
         entity:
           domain: binary_sensor
@@ -83,7 +91,7 @@ blueprint:
     time_pattern_minutes:
       name: Time Pattern — Minutes Interval
       description: >
-        Used only when no trigger entity is set.
+        Used only when Use Motion Sensor Trigger is disabled.
         /5 = every 5 min, /30 = every 30 min, etc.
       default: /30
       selector:
@@ -101,23 +109,35 @@ blueprint:
           unit_of_measurement: min
           mode: slider
 
+    use_cooldown_helper:
+      name: Enable Cooldown
+      description: >
+        Enable cooldown tracking. Requires an input_datetime helper below.
+      default: false
+      selector:
+        boolean:
+
     cooldown_helper:
       name: Cooldown Helper (input_datetime)
       description: >
         An input_datetime (Date and Time) helper to track the last run.
-        Required when cooldown > 0.
-      default: ""
+        Only used when Enable Cooldown is on.
+      default: "input_datetime.placeholder"
       selector:
         entity:
           domain: input_datetime
 
     # ── NOTIFICATIONS ─────────────────────────────────────────────────────────
+    use_notify:
+      name: Enable Mobile Notifications
+      default: false
+      selector:
+        boolean:
+
     notify_target:
-      name: Mobile Notification Target (optional)
-      description: >
-        Notify service, e.g. notify.mobile_app_your_phone.
-        Leave empty to skip mobile notifications.
-      default: ""
+      name: Mobile Notification Target
+      description: Notify service, e.g. notify.mobile_app_your_phone.
+      default: notify.notify
       selector:
         text:
 
@@ -140,10 +160,19 @@ blueprint:
       selector:
         boolean:
 
+    use_logbook_entity:
+      name: Use custom Logbook Entity
+      description: >
+        Enable to associate logbook entries with a specific entity.
+        If disabled, the camera entity is used.
+      default: false
+      selector:
+        boolean:
+
     logbook_entity:
-      name: Logbook Entity (optional)
-      description: Defaults to the camera entity if left empty.
-      default: ""
+      name: Logbook Entity
+      description: Only used when Use custom Logbook Entity is enabled.
+      default: "input_text.placeholder"
       selector:
         entity:
 
@@ -157,8 +186,7 @@ blueprint:
 
     persistent_notification_id_prefix:
       name: Persistent Notification ID Prefix
-      description: >
-        Prefix for notification IDs. Use only letters, numbers and underscores.
+      description: Use only letters, numbers and underscores.
       default: ai_camera
       selector:
         text:
@@ -172,15 +200,15 @@ blueprint:
 
     tts_target:
       name: TTS Media Player
-      default: ""
+      description: Only used when Enable TTS Announcement is on.
+      default: "media_player.placeholder"
       selector:
         entity:
           domain: media_player
 
     tts_service:
       name: TTS Service
-      description: >
-        e.g. tts.cloud_say, tts.google_translate_say, tts.piper
+      description: e.g. tts.cloud_say, tts.google_translate_say, tts.piper
       default: tts.cloud_say
       selector:
         text:
@@ -198,9 +226,18 @@ blueprint:
       selector:
         boolean:
 
+    use_tts_person:
+      name: Enable home presence check
+      description: >
+        Enable to check a person/group entity before announcing.
+      default: false
+      selector:
+        boolean:
+
     tts_person:
       name: Person / Group to check for home presence
-      default: ""
+      description: Only used when Enable home presence check is on.
+      default: "person.placeholder"
       selector:
         entity:
 
@@ -220,10 +257,13 @@ variables:
   camera_entities: !input camera_entities
   snapshot_base: !input snapshot_base_path
   cooldown_minutes: !input cooldown_minutes
+  use_cooldown_helper: !input use_cooldown_helper
   cooldown_helper: !input cooldown_helper
+  use_notify: !input use_notify
   notify_target: !input notify_target
   notify_with_image: !input notify_with_image
   logbook_enabled: !input logbook_enabled
+  use_logbook_entity: !input use_logbook_entity
   logbook_entity: !input logbook_entity
   persistent_notification_enabled: !input persistent_notification_enabled
   persistent_notification_id_prefix: !input persistent_notification_id_prefix
@@ -232,8 +272,9 @@ variables:
   tts_service: !input tts_service
   tts_language: !input tts_language
   tts_only_when_home: !input tts_only_when_home
+  use_tts_person: !input use_tts_person
   tts_person: !input tts_person
-  trigger_entity: !input trigger_entity
+  use_motion_trigger: !input use_motion_trigger
   text_helpers:
     - !input text_helper_1
     - !input text_helper_2
@@ -241,13 +282,19 @@ variables:
 
 # ── CONDITIONS ────────────────────────────────────────────────────────────────
 conditions:
+  # If motion trigger is enabled, only allow sensor_trigger; else only time_trigger
   - condition: template
     value_template: >
-      {{ trigger.id != 'time_trigger' or trigger_entity == '' }}
+      {% if use_motion_trigger %}
+        {{ trigger.id == 'sensor_trigger' }}
+      {% else %}
+        {{ trigger.id == 'time_trigger' }}
+      {% endif %}
 
+  # Cooldown gate
   - condition: template
     value_template: >
-      {% if cooldown_minutes == 0 or cooldown_helper == '' %}
+      {% if not use_cooldown_helper or cooldown_minutes == 0 %}
         true
       {% else %}
         {% set last = states(cooldown_helper) %}
@@ -265,13 +312,11 @@ actions:
   - alias: Update cooldown timestamp
     if:
       - condition: template
-        value_template: "{{ cooldown_helper != '' }}"
+        value_template: "{{ use_cooldown_helper and cooldown_minutes > 0 }}"
     then:
-      - variables:
-          _cooldown_helper: "{{ cooldown_helper }}"
       - action: input_datetime.set_datetime
         data:
-          entity_id: "{{ _cooldown_helper }}"
+          entity_id: "{{ cooldown_helper }}"
           datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
 
   # ── Per-camera loop ─────────────────────────────────────────────────────────
@@ -291,10 +336,8 @@ actions:
                  else '' }}
             notification_id: >
               {{ persistent_notification_id_prefix }}_{{ repeat.item.split('.')[1] }}
-            _logbook_entity: >
-              {{ logbook_entity if logbook_entity != '' else repeat.item }}
-            _tts_target: "{{ tts_target }}"
-            _tts_service: "{{ tts_service }}"
+            resolved_logbook_entity: >
+              {{ logbook_entity if use_logbook_entity else repeat.item }}
 
         # 1. Snapshot
         - alias: "Take snapshot — {{ current_camera }}"
@@ -321,7 +364,9 @@ actions:
         - alias: Store in text helper
           if:
             - condition: template
-              value_template: "{{ current_helper != '' }}"
+              value_template: >
+                {{ current_helper != '' and
+                   not current_helper.endswith('placeholder') }}
           then:
             - action: input_text.set_value
               data:
@@ -338,13 +383,13 @@ actions:
               data:
                 name: "AI Camera — {{ camera_label }}"
                 message: "{{ ai_response.text }}"
-                entity_id: "{{ _logbook_entity }}"
+                entity_id: "{{ resolved_logbook_entity }}"
 
         # 5. Mobile notification
         - alias: Mobile notification
           if:
             - condition: template
-              value_template: "{{ notify_target != '' }}"
+              value_template: "{{ use_notify }}"
           then:
             - action: "{{ notify_target }}"
               data:
@@ -379,18 +424,19 @@ actions:
           if:
             - condition: template
               value_template: >
-                {{ tts_enabled and _tts_target != '' and _tts_service != '' }}
+                {{ tts_enabled and
+                   not tts_target.endswith('placeholder') }}
             - condition: template
               value_template: >
-                {% if tts_only_when_home and tts_person != '' %}
+                {% if tts_only_when_home and use_tts_person %}
                   {{ is_state(tts_person, 'home') }}
                 {% else %}
                   true
                 {% endif %}
           then:
-            - action: "{{ _tts_service }}"
+            - action: "{{ tts_service }}"
               data:
-                entity_id: "{{ _tts_target }}"
+                entity_id: "{{ tts_target }}"
                 message: "Camera {{ camera_label }}: {{ ai_response.text }}"
                 language: "{{ tts_language }}"
 
