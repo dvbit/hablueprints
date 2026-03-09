@@ -1,20 +1,37 @@
 blueprint:
   name: AI Camera Describer
   description: >
-    Uses an AI Task entity to describe a camera directly via media-source.
-    Stores the description in a text helper, logs to the Logbook, optionally
-    sends a mobile notification, announces via TTS, and updates a persistent
-    notification in the sidebar.
+    Uses an AI Task entity to describe a camera. Stores the description in a
+    text helper, logs to the Logbook, optionally sends a mobile notification
+    with the snapshot image attached, announces via TTS, and updates a
+    persistent notification in the sidebar.
   domain: automation
   input:
 
     # ── CAMERA ───────────────────────────────────────────────────────────────
+    camera_entity:
+      name: Camera Entity
+      description: >
+        The camera entity, used to take the snapshot.
+      selector:
+        entity:
+          domain: camera
+
     camera_source:
       name: Camera Media Source
       description: >
-        Full media source URI for your camera.
-        Example: media-source://camera/camera.front_door
+        Full media source URI for your camera. Must match the camera entity above.
+        Example: media-source://camera/camera.pranzo
       default: "media-source://camera/camera.your_camera"
+      selector:
+        text:
+
+    snapshot_path:
+      name: Snapshot File Path
+      description: >
+        Where to save the snapshot for notifications. Must be inside /config/www/.
+        Example: /config/www/ai_snapshots/camera.jpg
+      default: "/config/www/ai_snapshots/camera.jpg"
       selector:
         text:
 
@@ -208,6 +225,7 @@ variables:
   use_cooldown_helper: !input use_cooldown_helper
   cooldown_minutes: !input cooldown_minutes
   cooldown_helper: !input cooldown_helper
+  snapshot_path: !input snapshot_path
   logbook_enabled: !input logbook_enabled
   persistent_notification_enabled: !input persistent_notification_enabled
   persistent_notification_id: !input persistent_notification_id
@@ -220,6 +238,8 @@ variables:
   tts_only_when_home: !input tts_only_when_home
   use_tts_person: !input use_tts_person
   tts_person: !input tts_person
+  snapshot_url: >
+    /local/{{ snapshot_path | replace('/config/www/', '') }}
 
 # ── CONDITIONS ────────────────────────────────────────────────────────────────
 conditions:
@@ -256,6 +276,15 @@ actions:
         data:
           entity_id: "{{ cooldown_helper }}"
           datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+  - alias: Take snapshot
+    action: camera.snapshot
+    data:
+      entity_id: !input camera_entity
+      filename: !input snapshot_path
+
+  - delay:
+      seconds: 1
 
   - alias: AI describe camera
     action: ai_task.generate_data
@@ -294,7 +323,12 @@ actions:
         data:
           notification_id: "{{ persistent_notification_id }}"
           title: "📷 AI Camera"
-          message: "**{{ now().strftime('%d/%m/%Y %H:%M') }}**\n\n{{ ai_response.data }}"
+          message: >
+            **{{ now().strftime('%d/%m/%Y %H:%M') }}**
+
+            {{ ai_response.data }}
+
+            ![snapshot]({{ snapshot_url }})
 
   - alias: Mobile notification
     if:
@@ -305,6 +339,8 @@ actions:
         data:
           title: !input notify_title
           message: "{{ ai_response.data }}"
+          data:
+            image: "{{ snapshot_url }}"
 
   - alias: TTS announcement
     if:
