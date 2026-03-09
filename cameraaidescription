@@ -1,15 +1,527 @@
-Risultato:
-params:
-  domain: ai_task
-  service: generate_data
-  service_data:
-    task_name: Describe snapshot from camera.cucina
-    model: conversation.google_ai_conversation
-    instructions: >
-      You are a home security assistant. Describe what you see in this camera
-      image clearly and concisely. Note any people, vehicles, animals, or
-      unusual activity. Keep the description under 3 sentences.
-    image_urls:
-      - /local/ai_snapshots/cucina.jpg
-  target: {}
-running_script: false
+blueprint:
+  name: AI Camera Snapshot Describer (Full)
+  description: >
+    Uses an AI Task entity to describe one or more cameras directly via
+    media-source attachments. Stores descriptions in text helpers, logs to
+    the Logbook, sends mobile notifications, announces via TTS, and updates
+    a persistent notification panel.
+  domain: automation
+  author: Home Assistant Community
+  input:
+
+    # ── CAMERAS ──────────────────────────────────────────────────────────────
+    camera_1:
+      name: Camera 1
+      selector:
+        entity:
+          domain: camera
+
+    camera_2:
+      name: Camera 2 (optional)
+      default: "camera.placeholder"
+      selector:
+        entity:
+          domain: camera
+
+    camera_3:
+      name: Camera 3 (optional)
+      default: "camera.placeholder"
+      selector:
+        entity:
+          domain: camera
+
+    # ── AI ────────────────────────────────────────────────────────────────────
+    ai_task_entity:
+      name: AI Task Entity
+      description: >
+        The ai_task.* entity to use. Add an "AI Task" sub-entry in your
+        AI integration first (Settings → Integrations → your AI → Configure).
+      selector:
+        entity:
+          domain: ai_task
+
+    ai_instructions:
+      name: AI Instructions
+      description: Prompt given to the AI for every camera image.
+      default: >
+        You are a home security assistant.
+        Describe what you see in this camera image clearly and concisely.
+        Note any people, vehicles, animals, or unusual activity.
+        Keep the description under 3 sentences.
+      selector:
+        text:
+          multiline: true
+
+    # ── TEXT HELPERS ──────────────────────────────────────────────────────────
+    text_helper_1:
+      name: Text Helper — Camera 1
+      description: input_text helper to store the AI description for camera 1.
+      selector:
+        entity:
+          domain: input_text
+
+    text_helper_2:
+      name: Text Helper — Camera 2 (optional)
+      default: "input_text.placeholder"
+      selector:
+        entity:
+          domain: input_text
+
+    text_helper_3:
+      name: Text Helper — Camera 3 (optional)
+      default: "input_text.placeholder"
+      selector:
+        entity:
+          domain: input_text
+
+    # ── TRIGGER ───────────────────────────────────────────────────────────────
+    use_motion_trigger:
+      name: Use Motion Sensor Trigger
+      description: Enable to trigger on a binary sensor instead of a time pattern.
+      default: false
+      selector:
+        boolean:
+
+    trigger_entity:
+      name: Trigger Entity
+      description: Binary sensor (only used when Use Motion Sensor Trigger is on).
+      default: "binary_sensor.placeholder"
+      selector:
+        entity:
+          domain: binary_sensor
+
+    time_pattern_minutes:
+      name: Time Pattern — Minutes Interval
+      description: >
+        Used only when Use Motion Sensor Trigger is off.
+        /5 = every 5 min, /30 = every 30 min, etc.
+      default: /30
+      selector:
+        text:
+
+    # ── COOLDOWN ──────────────────────────────────────────────────────────────
+    use_cooldown_helper:
+      name: Enable Cooldown
+      description: Requires an input_datetime helper below.
+      default: false
+      selector:
+        boolean:
+
+    cooldown_minutes:
+      name: Cooldown (minutes)
+      description: Minimum time between runs.
+      default: 5
+      selector:
+        number:
+          min: 0
+          max: 120
+          unit_of_measurement: min
+          mode: slider
+
+    cooldown_helper:
+      name: Cooldown Helper (input_datetime)
+      description: Only used when Enable Cooldown is on.
+      default: "input_datetime.placeholder"
+      selector:
+        entity:
+          domain: input_datetime
+
+    # ── NOTIFICATIONS ─────────────────────────────────────────────────────────
+    use_notify:
+      name: Enable Mobile Notifications
+      default: false
+      selector:
+        boolean:
+
+    notify_target:
+      name: Mobile Notification Target
+      description: e.g. notify.mobile_app_your_phone
+      default: notify.notify
+      selector:
+        text:
+
+    notify_title:
+      name: Notification Title
+      default: "📷 Camera AI Update"
+      selector:
+        text:
+
+    # ── LOGBOOK ───────────────────────────────────────────────────────────────
+    logbook_enabled:
+      name: Enable Logbook Logging
+      default: true
+      selector:
+        boolean:
+
+    # ── PERSISTENT NOTIFICATIONS ──────────────────────────────────────────────
+    persistent_notification_enabled:
+      name: Enable Persistent Notification Panel
+      default: true
+      selector:
+        boolean:
+
+    persistent_notification_id_prefix:
+      name: Persistent Notification ID Prefix
+      description: Use only letters, numbers and underscores.
+      default: ai_camera
+      selector:
+        text:
+
+    # ── TTS ───────────────────────────────────────────────────────────────────
+    tts_enabled:
+      name: Enable TTS Announcement
+      default: false
+      selector:
+        boolean:
+
+    tts_target:
+      name: TTS Media Player
+      description: Only used when Enable TTS is on.
+      default: "media_player.placeholder"
+      selector:
+        entity:
+          domain: media_player
+
+    tts_service:
+      name: TTS Service
+      description: e.g. tts.cloud_say, tts.google_translate_say, tts.piper
+      default: tts.cloud_say
+      selector:
+        text:
+
+    tts_language:
+      name: TTS Language
+      description: e.g. en-US, it-IT, de-DE
+      default: en-US
+      selector:
+        text:
+
+    tts_only_when_home:
+      name: Announce only when someone is home
+      default: true
+      selector:
+        boolean:
+
+    use_tts_person:
+      name: Enable home presence check
+      default: false
+      selector:
+        boolean:
+
+    tts_person:
+      name: Person / Group for home presence check
+      description: Only used when Enable home presence check is on.
+      default: "person.placeholder"
+      selector:
+        entity:
+
+# ── TRIGGERS ──────────────────────────────────────────────────────────────────
+triggers:
+  - trigger: state
+    entity_id: !input trigger_entity
+    to: "on"
+    id: sensor_trigger
+
+  - trigger: time_pattern
+    minutes: !input time_pattern_minutes
+    id: time_trigger
+
+# ── VARIABLES ─────────────────────────────────────────────────────────────────
+variables:
+  use_cooldown_helper: !input use_cooldown_helper
+  cooldown_minutes: !input cooldown_minutes
+  cooldown_helper: !input cooldown_helper
+  use_notify: !input use_notify
+  notify_target: !input notify_target
+  logbook_enabled: !input logbook_enabled
+  persistent_notification_enabled: !input persistent_notification_enabled
+  persistent_notification_id_prefix: !input persistent_notification_id_prefix
+  tts_enabled: !input tts_enabled
+  tts_target: !input tts_target
+  tts_service: !input tts_service
+  tts_language: !input tts_language
+  tts_only_when_home: !input tts_only_when_home
+  use_tts_person: !input use_tts_person
+  tts_person: !input tts_person
+  use_motion_trigger: !input use_motion_trigger
+  camera_2: !input camera_2
+  camera_3: !input camera_3
+  text_helper_2: !input text_helper_2
+  text_helper_3: !input text_helper_3
+
+# ── CONDITIONS ────────────────────────────────────────────────────────────────
+conditions:
+  - condition: template
+    value_template: >
+      {% if use_motion_trigger %}
+        {{ trigger.id == 'sensor_trigger' }}
+      {% else %}
+        {{ trigger.id == 'time_trigger' }}
+      {% endif %}
+
+  - condition: template
+    value_template: >
+      {% if not use_cooldown_helper or cooldown_minutes == 0 %}
+        true
+      {% else %}
+        {% set last = states(cooldown_helper) %}
+        {% if last in ['unknown', 'unavailable', ''] %}
+          true
+        {% else %}
+          {{ (now() - strptime(last, '%Y-%m-%d %H:%M:%S')).total_seconds() > cooldown_minutes * 60 }}
+        {% endif %}
+      {% endif %}
+
+# ── ACTIONS ───────────────────────────────────────────────────────────────────
+actions:
+
+  # ── Cooldown stamp ──────────────────────────────────────────────────────────
+  - alias: Update cooldown timestamp
+    if:
+      - condition: template
+        value_template: "{{ use_cooldown_helper and cooldown_minutes > 0 }}"
+    then:
+      - action: input_datetime.set_datetime
+        data:
+          entity_id: "{{ cooldown_helper }}"
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # CAMERA 1 — always runs
+  # ════════════════════════════════════════════════════════════════════════════
+  - alias: AI describe — Camera 1
+    action: ai_task.generate_data
+    data:
+      entity_id: !input ai_task_entity
+      task_name: "Describe camera 1"
+      instructions: !input ai_instructions
+      attachments:
+        media_content_id: "media-source://camera/{{ !input camera_1 }}"
+        media_content_type: image/jpeg
+    response_variable: ai_response_1
+
+  - alias: Post-process Camera 1
+    variables:
+      cam_label: >
+        {{ (states['camera'] | selectattr('entity_id','eq', '!input camera_1') | first).name
+           | default('!input camera_1' | replace('camera.','') | replace('_',' ') | title) }}
+      notification_id_1: "{{ persistent_notification_id_prefix }}_{{ '!input camera_1' | replace('camera.','') }}"
+
+  - &post_process
+    alias: Store / notify / log / tts — Camera 1
+    sequence:
+      - if:
+          - condition: template
+            value_template: "{{ true }}"
+        then:
+          - action: input_text.set_value
+            data:
+              entity_id: !input text_helper_1
+              value: "{{ ai_response_1.data }}"
+
+      - if:
+          - condition: template
+            value_template: "{{ logbook_enabled }}"
+        then:
+          - action: logbook.log
+            data:
+              name: "AI Camera"
+              message: "Camera 1: {{ ai_response_1.data }}"
+              entity_id: !input camera_1
+
+      - if:
+          - condition: template
+            value_template: "{{ persistent_notification_enabled }}"
+        then:
+          - action: persistent_notification.create
+            data:
+              notification_id: "{{ persistent_notification_id_prefix }}_cam1"
+              title: "📷 Camera 1"
+              message: >
+                **{{ now().strftime('%d/%m/%Y %H:%M') }}**
+
+                {{ ai_response_1.data }}
+
+      - if:
+          - condition: template
+            value_template: "{{ use_notify }}"
+        then:
+          - action: "{{ notify_target }}"
+            data:
+              title: !input notify_title
+              message: "📍 Camera 1: {{ ai_response_1.data }}"
+
+      - if:
+          - condition: template
+            value_template: >
+              {{ tts_enabled and tts_target != 'media_player.placeholder' }}
+          - condition: template
+            value_template: >
+              {% if tts_only_when_home and use_tts_person %}
+                {{ is_state(tts_person, 'home') }}
+              {% else %}
+                true
+              {% endif %}
+        then:
+          - action: "{{ tts_service }}"
+            data:
+              entity_id: "{{ tts_target }}"
+              message: "Camera 1: {{ ai_response_1.data }}"
+              language: "{{ tts_language }}"
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # CAMERA 2 — only if not placeholder
+  # ════════════════════════════════════════════════════════════════════════════
+  - if:
+      - condition: template
+        value_template: "{{ camera_2 != 'camera.placeholder' }}"
+    then:
+      - alias: AI describe — Camera 2
+        action: ai_task.generate_data
+        data:
+          entity_id: !input ai_task_entity
+          task_name: "Describe camera 2"
+          instructions: !input ai_instructions
+          attachments:
+            media_content_id: "media-source://camera/{{ camera_2 }}"
+            media_content_type: image/jpeg
+        response_variable: ai_response_2
+
+      - if:
+          - condition: template
+            value_template: "{{ text_helper_2 != 'input_text.placeholder' }}"
+        then:
+          - action: input_text.set_value
+            data:
+              entity_id: "{{ text_helper_2 }}"
+              value: "{{ ai_response_2.data }}"
+
+      - if:
+          - condition: template
+            value_template: "{{ logbook_enabled }}"
+        then:
+          - action: logbook.log
+            data:
+              name: "AI Camera"
+              message: "Camera 2: {{ ai_response_2.data }}"
+              entity_id: "{{ camera_2 }}"
+
+      - if:
+          - condition: template
+            value_template: "{{ persistent_notification_enabled }}"
+        then:
+          - action: persistent_notification.create
+            data:
+              notification_id: "{{ persistent_notification_id_prefix }}_cam2"
+              title: "📷 Camera 2"
+              message: >
+                **{{ now().strftime('%d/%m/%Y %H:%M') }}**
+
+                {{ ai_response_2.data }}
+
+      - if:
+          - condition: template
+            value_template: "{{ use_notify }}"
+        then:
+          - action: "{{ notify_target }}"
+            data:
+              title: !input notify_title
+              message: "📍 Camera 2: {{ ai_response_2.data }}"
+
+      - if:
+          - condition: template
+            value_template: >
+              {{ tts_enabled and tts_target != 'media_player.placeholder' }}
+          - condition: template
+            value_template: >
+              {% if tts_only_when_home and use_tts_person %}
+                {{ is_state(tts_person, 'home') }}
+              {% else %}
+                true
+              {% endif %}
+        then:
+          - action: "{{ tts_service }}"
+            data:
+              entity_id: "{{ tts_target }}"
+              message: "Camera 2: {{ ai_response_2.data }}"
+              language: "{{ tts_language }}"
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # CAMERA 3 — only if not placeholder
+  # ════════════════════════════════════════════════════════════════════════════
+  - if:
+      - condition: template
+        value_template: "{{ camera_3 != 'camera.placeholder' }}"
+    then:
+      - alias: AI describe — Camera 3
+        action: ai_task.generate_data
+        data:
+          entity_id: !input ai_task_entity
+          task_name: "Describe camera 3"
+          instructions: !input ai_instructions
+          attachments:
+            media_content_id: "media-source://camera/{{ camera_3 }}"
+            media_content_type: image/jpeg
+        response_variable: ai_response_3
+
+      - if:
+          - condition: template
+            value_template: "{{ text_helper_3 != 'input_text.placeholder' }}"
+        then:
+          - action: input_text.set_value
+            data:
+              entity_id: "{{ text_helper_3 }}"
+              value: "{{ ai_response_3.data }}"
+
+      - if:
+          - condition: template
+            value_template: "{{ logbook_enabled }}"
+        then:
+          - action: logbook.log
+            data:
+              name: "AI Camera"
+              message: "Camera 3: {{ ai_response_3.data }}"
+              entity_id: "{{ camera_3 }}"
+
+      - if:
+          - condition: template
+            value_template: "{{ persistent_notification_enabled }}"
+        then:
+          - action: persistent_notification.create
+            data:
+              notification_id: "{{ persistent_notification_id_prefix }}_cam3"
+              title: "📷 Camera 3"
+              message: >
+                **{{ now().strftime('%d/%m/%Y %H:%M') }}**
+
+                {{ ai_response_3.data }}
+
+      - if:
+          - condition: template
+            value_template: "{{ use_notify }}"
+        then:
+          - action: "{{ notify_target }}"
+            data:
+              title: !input notify_title
+              message: "📍 Camera 3: {{ ai_response_3.data }}"
+
+      - if:
+          - condition: template
+            value_template: >
+              {{ tts_enabled and tts_target != 'media_player.placeholder' }}
+          - condition: template
+            value_template: >
+              {% if tts_only_when_home and use_tts_person %}
+                {{ is_state(tts_person, 'home') }}
+              {% else %}
+                true
+              {% endif %}
+        then:
+          - action: "{{ tts_service }}"
+            data:
+              entity_id: "{{ tts_target }}"
+              message: "Camera 3: {{ ai_response_3.data }}"
+              language: "{{ tts_language }}"
+
+mode: single
+max_exceeded: silent
