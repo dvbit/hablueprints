@@ -73,8 +73,8 @@ blueprint:
     trigger_entity:
       name: Trigger Entity (optional)
       description: >
-        Binary sensor that fires the automation on state change to "on"
-        (e.g. a motion sensor). Leave empty to use a time-pattern trigger.
+        Binary sensor that fires the automation on state change to "on".
+        Leave empty to use a time-pattern trigger.
       default: ""
       selector:
         entity:
@@ -92,8 +92,7 @@ blueprint:
     # ── COOLDOWN ──────────────────────────────────────────────────────────────
     cooldown_minutes:
       name: Cooldown (minutes)
-      description: >
-        Minimum time between runs. Set to 0 to disable.
+      description: Minimum time between runs. Set to 0 to disable.
       default: 5
       selector:
         number:
@@ -105,7 +104,7 @@ blueprint:
     cooldown_helper:
       name: Cooldown Helper (input_datetime)
       description: >
-        An input_datetime (Date and Time) helper used to track the last run.
+        An input_datetime (Date and Time) helper to track the last run.
         Required when cooldown > 0.
       default: ""
       selector:
@@ -124,7 +123,6 @@ blueprint:
 
     notify_title:
       name: Notification Title
-      description: Title used for all camera notifications.
       default: "📷 Camera AI Update"
       selector:
         text:
@@ -144,9 +142,7 @@ blueprint:
 
     logbook_entity:
       name: Logbook Entity (optional)
-      description: >
-        Entity to associate logbook entries with.
-        Defaults to the camera entity if left empty.
+      description: Defaults to the camera entity if left empty.
       default: ""
       selector:
         entity:
@@ -154,9 +150,7 @@ blueprint:
     # ── PERSISTENT NOTIFICATIONS ──────────────────────────────────────────────
     persistent_notification_enabled:
       name: Enable Persistent Notification Panel
-      description: >
-        Creates/updates a persistent notification in the HA sidebar
-        for each camera after every run.
+      description: Creates/updates a persistent notification in the HA sidebar.
       default: true
       selector:
         boolean:
@@ -164,8 +158,7 @@ blueprint:
     persistent_notification_id_prefix:
       name: Persistent Notification ID Prefix
       description: >
-        Prefix for notification IDs. Each camera gets its own notification:
-        {prefix}_{camera_id}. Use only letters, numbers and underscores.
+        Prefix for notification IDs. Use only letters, numbers and underscores.
       default: ai_camera
       selector:
         text:
@@ -173,14 +166,12 @@ blueprint:
     # ── TTS ───────────────────────────────────────────────────────────────────
     tts_enabled:
       name: Enable TTS Announcement
-      description: Announce the AI description via a media player.
       default: false
       selector:
         boolean:
 
     tts_target:
       name: TTS Media Player
-      description: The media player to announce descriptions on.
       default: ""
       selector:
         entity:
@@ -189,35 +180,26 @@ blueprint:
     tts_service:
       name: TTS Service
       description: >
-        The TTS service to use, e.g. tts.cloud_say (Nabu Casa),
-        tts.google_translate_say, tts.piper, etc.
+        e.g. tts.cloud_say, tts.google_translate_say, tts.piper
       default: tts.cloud_say
       selector:
         text:
 
     tts_language:
       name: TTS Language
-      description: >
-        Language code for TTS, e.g. en-US, it-IT, de-DE.
-        Leave empty to use the service default.
+      description: e.g. en-US, it-IT, de-DE
       default: en-US
       selector:
         text:
 
     tts_only_when_home:
       name: Announce only when someone is home
-      description: >
-        Skip TTS if no one is home (requires a group.all_persons or
-        person entity to be in "home" state).
       default: true
       selector:
         boolean:
 
     tts_person:
       name: Person / Group to check for home presence
-      description: >
-        Used when "Announce only when someone is home" is enabled.
-        Can be a person.* or group.* entity.
       default: ""
       selector:
         entity:
@@ -259,12 +241,10 @@ variables:
 
 # ── CONDITIONS ────────────────────────────────────────────────────────────────
 conditions:
-  # Suppress time trigger when a sensor trigger entity is set
   - condition: template
     value_template: >
       {{ trigger.id != 'time_trigger' or trigger_entity == '' }}
 
-  # Cooldown gate
   - condition: template
     value_template: >
       {% if cooldown_minutes == 0 or cooldown_helper == '' %}
@@ -281,19 +261,20 @@ conditions:
 # ── ACTIONS ───────────────────────────────────────────────────────────────────
 actions:
 
-  # Stamp cooldown immediately
+  # ── Stamp cooldown ──────────────────────────────────────────────────────────
   - alias: Update cooldown timestamp
     if:
       - condition: template
         value_template: "{{ cooldown_helper != '' }}"
     then:
+      - variables:
+          _cooldown_helper: "{{ cooldown_helper }}"
       - action: input_datetime.set_datetime
-        target:
-          entity_id: !input cooldown_helper
         data:
+          entity_id: "{{ _cooldown_helper }}"
           datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
 
-  # ── PER-CAMERA LOOP ─────────────────────────────────────────────────────────
+  # ── Per-camera loop ─────────────────────────────────────────────────────────
   - alias: Process each camera
     repeat:
       for_each: "{{ camera_entities }}"
@@ -301,25 +282,25 @@ actions:
 
         - variables:
             current_camera: "{{ repeat.item }}"
-            camera_label: >
-              {{ repeat.item.split('.')[1] | replace('_', ' ') | title }}
-            snapshot_file: >
-              {{ snapshot_base }}/{{ repeat.item.split('.')[1] }}.jpg
-            local_url: >
-              /local/{{ snapshot_base | replace('/config/www/', '') }}/{{ repeat.item.split('.')[1] }}.jpg
+            camera_label: "{{ repeat.item.split('.')[1] | replace('_', ' ') | title }}"
+            snapshot_file: "{{ snapshot_base }}/{{ repeat.item.split('.')[1] }}.jpg"
+            local_url: "/local/{{ snapshot_base | replace('/config/www/', '') }}/{{ repeat.item.split('.')[1] }}.jpg"
             current_helper: >
               {{ text_helpers[repeat.index - 1]
                  if repeat.index <= text_helpers | length
                  else '' }}
             notification_id: >
               {{ persistent_notification_id_prefix }}_{{ repeat.item.split('.')[1] }}
+            _logbook_entity: >
+              {{ logbook_entity if logbook_entity != '' else repeat.item }}
+            _tts_target: "{{ tts_target }}"
+            _tts_service: "{{ tts_service }}"
 
         # 1. Snapshot
         - alias: "Take snapshot — {{ current_camera }}"
           action: camera.snapshot
-          target:
-            entity_id: "{{ current_camera }}"
           data:
+            entity_id: "{{ current_camera }}"
             filename: "{{ snapshot_file }}"
 
         - delay:
@@ -343,9 +324,8 @@ actions:
               value_template: "{{ current_helper != '' }}"
           then:
             - action: input_text.set_value
-              target:
-                entity_id: "{{ current_helper }}"
               data:
+                entity_id: "{{ current_helper }}"
                 value: "{{ ai_response.text }}"
 
         # 4. Logbook
@@ -358,8 +338,7 @@ actions:
               data:
                 name: "AI Camera — {{ camera_label }}"
                 message: "{{ ai_response.text }}"
-                entity_id: >
-                  {{ logbook_entity if logbook_entity != '' else current_camera }}
+                entity_id: "{{ _logbook_entity }}"
 
         # 5. Mobile notification
         - alias: Mobile notification
@@ -378,7 +357,7 @@ actions:
                   {}
                   {% endif %}
 
-        # 6. Persistent notification (sidebar panel)
+        # 6. Persistent notification
         - alias: Persistent notification
           if:
             - condition: template
@@ -395,12 +374,12 @@ actions:
 
                   ![snapshot]({{ local_url }})
 
-        # 7. TTS announcement
+        # 7. TTS
         - alias: TTS announcement
           if:
             - condition: template
               value_template: >
-                {{ tts_enabled and tts_target != '' and tts_service != '' }}
+                {{ tts_enabled and _tts_target != '' and _tts_service != '' }}
             - condition: template
               value_template: >
                 {% if tts_only_when_home and tts_person != '' %}
@@ -409,13 +388,12 @@ actions:
                   true
                 {% endif %}
           then:
-            - action: "{{ tts_service }}"
+            - action: "{{ _tts_service }}"
               data:
-                entity_id: "{{ tts_target }}"
+                entity_id: "{{ _tts_target }}"
                 message: "Camera {{ camera_label }}: {{ ai_response.text }}"
                 language: "{{ tts_language }}"
 
-        # Pace API calls between cameras
         - delay:
             milliseconds: 500
 
